@@ -3,16 +3,22 @@ package scanner
 import (
     "fmt"
     "net"
+    "sync"
     "time"
+    "github.com/loyality7/Isecot/internal/device"
 )
 
-func ScanNetwork() {
+func ScanNetwork() []*device.Device {
     fmt.Println("Scanning network for IoT devices...")
     interfaces, err := net.Interfaces()
     if err != nil {
         fmt.Println("Error getting network interfaces:", err)
-        return
+        return nil
     }
+
+    var wg sync.WaitGroup
+    var devices []*device.Device
+    var mutex sync.Mutex
 
     for _, iface := range interfaces {
         addrs, err := iface.Addrs()
@@ -25,30 +31,49 @@ func ScanNetwork() {
                 continue
             }
             if ipnet.IP.To4() != nil {
-                scanRange(ipnet)
+                wg.Add(1)
+                go func(ipnet *net.IPNet) {
+                    defer wg.Done()
+                    scanRange(ipnet, &devices, &mutex)
+                }(ipnet)
             }
         }
     }
+    wg.Wait()
+    return devices
 }
 
-func scanRange(ipnet *net.IPNet) {
+func scanRange(ipnet *net.IPNet, devices *[]*device.Device, mutex *sync.Mutex) {
     ip := ipnet.IP.Mask(ipnet.Mask)
     for {
-        go tryConnection(ip.String())
+        if d := tryConnection(ip.String()); d != nil {
+            mutex.Lock()
+            *devices = append(*devices, d)
+            mutex.Unlock()
+        }
         inc(ip)
         if !ipnet.Contains(ip) {
             break
         }
     }
-    time.Sleep(2 * time.Second) // Wait for goroutines to finish
 }
 
-func tryConnection(ip string) {
-    conn, err := net.DialTimeout("tcp", ip+":80", time.Millisecond*500)
-    if err == nil {
-        conn.Close()
-        fmt.Printf("Device found: %s\n", ip)
+func tryConnection(ip string) *device.Device {
+    commonPorts := []int{80, 443, 8080, 22, 23, 554}
+    openPorts := []int{}
+    for _, port := range commonPorts {
+        conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, port), time.Millisecond*500)
+        if err == nil {
+            conn.Close()
+            openPorts = append(openPorts, port)
+        }
     }
+    if len(openPorts) > 0 {
+        d, _ := device.GetDeviceInfo(ip)
+        d.OpenPorts = openPorts
+        return d
+    }
+    return nil
 }
 
 func inc(ip net.IP) {
@@ -59,3 +84,4 @@ func inc(ip net.IP) {
         }
     }
 }
+

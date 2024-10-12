@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/loyality7/Isecot/internal/scanner"
+	"github.com/loyality7/Isecot/internal/device"
 )
 
 func Start() {
@@ -27,7 +28,15 @@ func Start() {
 			fmt.Println("Goodbye!")
 			os.Exit(0)
 		case "scan":
-			scanner.ScanNetwork()
+			devices := scanner.ScanNetwork()
+			for _, d := range devices {
+				info, err := device.GetDeviceInfo(d.IP)
+				if err == nil {
+					fmt.Println(info)
+				} else {
+					fmt.Println(d)
+				}
+			}
 		default:
 			fmt.Println("Unknown command. Available commands: scan, exit")
 		}
